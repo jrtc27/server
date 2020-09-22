@@ -19200,6 +19200,8 @@ static void test_bug57058()
 static void test_bug11766854()
 {
   struct st_mysql_client_plugin *plugin;
+  if (getenv("QA_AUTH_CLIENT_SO") == NULL)
+    return; /*plugin not built.*/
 
   DBUG_ENTER("test_bug11766854");
   myheader("test_bug11766854");
@@ -20996,6 +20998,105 @@ static void test_execute_direct()
 #endif
 }
 
+static void test_cache_metadata()
+{
+  char char_val[]= "blah";
+  int int_val = 1;
+  MYSQL_BIND param= {0};
+  my_bool is_null= FALSE;
+
+
+  MYSQL_STMT* stmt= mysql_stmt_init(mysql);
+  check_stmt(stmt);
+  int rc= mysql_stmt_prepare(stmt, "SELECT ?", -1);
+  myquery(rc);
+
+  param.buffer= char_val;
+  param.buffer_type= MYSQL_TYPE_STRING;
+  param.is_null= &is_null;
+  param.buffer_length = 4;
+
+  rc= mysql_stmt_bind_param(stmt,&param);
+  rc= mysql_stmt_execute(stmt);
+  check_execute(stmt, rc);
+  rc= mysql_stmt_store_result(stmt);
+  check_execute(stmt, rc);
+
+
+
+  rc= mysql_stmt_execute(stmt);
+  check_execute(stmt, rc);
+  rc= mysql_stmt_store_result(stmt);
+  check_execute(stmt, rc);
+
+  param.buffer= &int_val;
+  param.buffer_type= MYSQL_TYPE_LONG;
+  param.is_null= &is_null;
+  rc= mysql_stmt_bind_param(stmt, &param);
+  rc= mysql_stmt_execute(stmt);
+  check_execute(stmt, rc);
+  rc= mysql_stmt_store_result(stmt);
+  check_execute(stmt, rc);
+
+
+  mysql_stmt_close(stmt);
+}
+
+static void test_cache_metadata2()
+{
+
+  MYSQL_FIELD* f;
+  MYSQL_STMT *stmt= mysql_stmt_init(mysql);
+
+  int rc= mysql_stmt_prepare(stmt, "CHECKSUM TABLE mysql.users", -1);
+
+  rc= mysql_stmt_execute(stmt);
+  check_execute(stmt, rc);
+  rc= mysql_stmt_store_result(stmt);
+  check_execute(stmt, rc);
+
+  rc= mysql_query(mysql,
+                  "CREATE OR REPLACE TABLE t1 (a int, b bigint) engine=memory");
+  myquery(rc);
+
+
+
+  check_stmt(stmt);
+  rc= mysql_stmt_prepare(stmt, "SELECT * from t1", -1);
+  myquery(rc);
+
+  rc= mysql_stmt_execute(stmt);
+  check_execute(stmt, rc);
+  rc= mysql_stmt_store_result(stmt);
+  check_execute(stmt, rc);
+
+  rc= mysql_stmt_execute(stmt);
+  check_execute(stmt, rc);
+  rc= mysql_stmt_store_result(stmt);
+  check_execute(stmt, rc);
+
+  rc= mysql_query(mysql, "ALTER TABLE t1 MODIFY b CHAR(10)");
+  myquery(rc);
+
+  rc= mysql_stmt_execute(stmt);
+  check_execute(stmt, rc);
+  rc= mysql_stmt_store_result(stmt);
+  check_execute(stmt, rc);
+
+  f= mysql_fetch_field_direct(mysql_stmt_result_metadata(stmt), 1);
+  /*
+     FIXME @GEORG. The field in STMT are not
+     refreshed, when execute returns changed columns.
+   */
+  //f= mysql_fetch_field_direct(mysql_result_metadata(mysql), 1);
+  //DIE_UNLESS(f->length == 10);
+  //DIE_UNLESS(f->type == MYSQL_TYPE_STRING);
+
+  mysql_stmt_close(stmt);
+  myquery(rc);
+}
+
+
 static struct my_tests_st my_tests[]= {
   { "disable_query_logs", disable_query_logs },
   { "test_view_sp_list_fields", test_view_sp_list_fields },
@@ -21292,6 +21393,8 @@ static struct my_tests_st my_tests[]= {
   { "test_mdev18408", test_mdev18408 },
   { "test_mdev20261", test_mdev20261 },
   { "test_execute_direct", test_execute_direct },
+  { "test_cache_metadata", test_cache_metadata},
+  { "test_cache_metadata2", test_cache_metadata2 },
   { 0, 0 }
 };
 

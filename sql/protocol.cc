@@ -911,6 +911,53 @@ bool Protocol_text::store_field_metadata(const THD * thd,
 }
 
 
+static uint64 calc_metadata_hash(THD *thd, List<Item> *list)
+{
+  List_iterator_fast<Item> it(*list);
+  Item *item;
+  uint32 cs= 0;
+  while ((item= it++))
+  {
+    Send_field field(thd, item);
+    auto type_handler= item->type_handler();
+    LEX_CSTRING data[]=
+    {
+        field.table_name,
+        field.org_table_name,
+        field.col_name,
+        field.db_name,
+        {(const char *) &field.length, sizeof(field.length)},
+        {(const char *) &field.flags, sizeof(field.flags)},
+        {(const char *) &field.decimals, sizeof(field.decimals)},
+        {(const char *) &type_handler, sizeof(type_handler)}
+    };
+    for (const auto &chunk : data)
+    {
+      cs= my_checksum(cs, chunk.str, chunk.length);
+    }
+  }
+  return cs;
+}
+
+
+static bool stmt_metadata_has_changed(THD *thd, List<Item> *list)
+{
+  if (!thd->cur_stmt)
+  {
+    /* Weird stuff, prepared statement containing CALL() containing EXECUTE.*/
+    return true;
+  }
+  auto metadata_checksum= calc_metadata_hash(thd, list);
+
+  if (thd->cur_stmt->metadata_checksum != metadata_checksum)
+  {
+    thd->cur_stmt->metadata_checksum= metadata_checksum;
+    return true;
+  }
+  return false;
+}
+
+
 /**
   Send name and type of result to client.
 
@@ -936,30 +983,60 @@ bool Protocol::send_result_set_metadata(List<Item> *list, uint flags)
   Protocol_text prot(thd, thd->variables.net_buffer_length);
   DBUG_ENTER("Protocol::send_result_set_metadata");
 
+  uchar send_metadata= 1;
+  if (thd->client_capabilities & MARIADB_CLIENT_CACHE_METADATA)
+  {
+    switch (thd->get_command())
+    {
+    case COM_STMT_EXECUTE:
+      send_metadata= stmt_metadata_has_changed(thd, list);
+      break;
+    case COM_STMT_PREPARE:
+      thd->cur_stmt->metadata_checksum= calc_metadata_hash(thd, list);
+      break;
+    default:
+      break;
+    }
+  }
+
   if (flags & SEND_NUM_ROWS)
-  {				// Packet with number of elements
-    uchar buff[MAX_INT_WIDTH];
+  {
+    /*
+      Packet with number of elements.
+
+      Will also have a 1 byte column info indicator, in case
+      MARIADB_CLIENT_CACHE_METADATA client capability is set.
+    */
+    uchar buff[MAX_INT_WIDTH+1];
     uchar *pos= net_store_length(buff, list->elements);
+    if (thd->client_capabilities & MARIADB_CLIENT_CACHE_METADATA)
+    {
+      /* indicator whether metadata is present, 1 byte */
+      *pos++= send_metadata;
+    }
     DBUG_ASSERT(pos <= buff + sizeof(buff));
     if (my_net_write(&thd->net, buff, (size_t) (pos-buff)))
       DBUG_RETURN(1);
   }
 
+  if (send_metadata)
+  {
 #ifndef DBUG_OFF
-  field_handlers= (const Type_handler**) thd->alloc(sizeof(field_handlers[0]) *
-                                                    list->elements);
+    field_handlers= (const Type_handler **) thd->alloc(
+        sizeof(field_handlers[0]) * list->elements);
 #endif
 
-  for (uint pos= 0; (item=it++); pos++)
-  {
-    prot.prepare_for_resend();
-    if (prot.store_item_metadata(thd, item, pos))
-      goto err;
-    if (prot.write())
-      DBUG_RETURN(1);
+    for (uint pos= 0; (item= it++); pos++)
+    {
+      prot.prepare_for_resend();
+      if (prot.store_item_metadata(thd, item, pos))
+        goto err;
+      if (prot.write())
+        DBUG_RETURN(1);
 #ifndef DBUG_OFF
-    field_handlers[pos]= item->type_handler();
+      field_handlers[pos]= item->type_handler();
 #endif
+    }
   }
 
   if (flags & SEND_EOF)

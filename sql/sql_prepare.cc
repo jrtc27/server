@@ -3209,6 +3209,7 @@ static void mysql_stmt_execute_common(THD *thd,
              llstr(stmt_id, llbuf), "mysqld_stmt_execute");
     DBUG_VOID_RETURN;
   }
+  thd->cur_stmt= stmt;
   stmt->read_types= read_types;
 
 #if defined(ENABLED_PROFILING)
@@ -3235,7 +3236,7 @@ static void mysql_stmt_execute_common(THD *thd,
 
   /* Close connection socket; for use with client testing (Bug#43560). */
   DBUG_EXECUTE_IF("close_conn_after_stmt_execute", vio_shutdown(thd->net.vio,SHUT_RD););
-
+  thd->cur_stmt= 0;
   DBUG_VOID_RETURN;
 }
 
@@ -3986,7 +3987,7 @@ bool Prepared_statement::prepare(const char *packet, uint packet_len)
 
   lex_start(thd);
   lex->context_analysis_only|= CONTEXT_ANALYSIS_ONLY_PREPARE;
-
+  thd->cur_stmt= this;
   error= (parse_sql(thd, & parser_state, NULL) ||
           thd->is_error() ||
           init_param_array(this));
@@ -4090,6 +4091,7 @@ bool Prepared_statement::prepare(const char *packet, uint packet_len)
     if (thd->spcont == NULL)
       general_log_write(thd, COM_STMT_PREPARE, query(), query_length());
   }
+  thd->cur_stmt= 0;
   DBUG_RETURN(error);
 }
 
@@ -4490,6 +4492,7 @@ Prepared_statement::reprepare()
   if (likely(!error))
   {
     MYSQL_REPREPARE_PS(m_prepared_stmt);
+    auto checksum= this->metadata_checksum;
     swap_prepared_statement(&copy);
     swap_parameter_array(param_array, copy.param_array, param_count);
 #ifdef DBUG_ASSERT_EXISTS
@@ -4503,6 +4506,8 @@ Prepared_statement::reprepare()
       it's failed, we need to return all the warnings to the user.
     */
     thd->get_stmt_da()->clear_warning_info(thd->query_id);
+    thd->cur_stmt= this;
+    metadata_checksum= checksum;
   }
   return error;
 }

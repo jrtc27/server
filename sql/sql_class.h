@@ -1281,6 +1281,7 @@ public:
 
   LEX_CSTRING db;
 
+  uint64 metadata_checksum= 0;
   /* This is set to 1 of last call to send_result_to_client() was ok */
   my_bool query_cache_is_applicable;
 
@@ -2381,6 +2382,8 @@ public:
 
   /* Last created prepared statement */
   Statement *last_stmt;
+  Statement *cur_stmt;
+
   inline void set_last_stmt(Statement *stmt)
   { last_stmt= (is_error() ? NULL : stmt); }
   inline void clear_last_stmt() { last_stmt= NULL; }
