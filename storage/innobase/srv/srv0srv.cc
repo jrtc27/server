@@ -396,6 +396,9 @@ my_bool	srv_force_primary_key;
 /** Key version to encrypt the temporary tablespace */
 my_bool innodb_encrypt_temporary_tables;
 
+#ifdef UNIV_DEBUG
+char* innodb_eval_sql;
+#endif /* UNIV_DEBUG */
 my_bool srv_immediate_scrub_data_uncompressed;
 
 /* Array of English strings describing the current state of an
