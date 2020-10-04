@@ -1971,42 +1971,6 @@ skip_monitors:
 		if (srv_force_recovery < SRV_FORCE_NO_BACKGROUND) {
 			srv_start_periodic_timer(srv_master_timer, srv_master_callback, 1000);
 		}
-
-		{
-			trx_t * trx = trx_create();
-
-			trx_set_dict_operation(trx, TRX_DICT_OP_TABLE);
-
-			trx->op_info = "executing custom sql code";
-
-			pars_info_t*	info = pars_info_create();
-			pars_info_add_str_literal(info, "id", "test_id");
-			pars_info_add_str_literal(info, "for_name", "test_for");
-			pars_info_add_str_literal(info, "ref_name", "test_ref");
-			pars_info_add_int4_literal(info, "n_cols", 1);
-			err = que_eval_sql(info,
-						"PROCEDURE P () IS\n"
-						"BEGIN\n"
-						"INSERT INTO SYS_FOREIGN VALUES"
-						"(:id, :for_name, :ref_name, :n_cols);\n"
-						"END;\n", true, trx);
-
-			info = pars_info_create();
-			pars_info_add_str_literal(info, "id", "test_id");
-			pars_info_add_int4_literal(info, "pos", 3);
-			pars_info_add_str_literal(info, "for_col_name", "test_x");
-			pars_info_add_str_literal(info, "ref_col_name", "test_y");
-			err= que_eval_sql(
-					info,
-					"PROCEDURE P () IS\n"
-					"BEGIN\n"
-					"INSERT INTO SYS_FOREIGN_COLS VALUES"
-					"(:id, :pos, :for_col_name, :ref_col_name);\n"
-					"END;\n",
-					true, trx);
-			trx_commit_for_mysql(trx);
-			trx->free();
-		}
 	}
 
 	if (!srv_read_only_mode && srv_operation == SRV_OPERATION_NORMAL
